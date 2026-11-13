@@ -1,0 +1,123 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default-deny all unspecified paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 160 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidMemberUids(uids) {
+      return uids is list
+        && uids.size() >= 1
+        && uids.size() <= 4
+        && uids[0] is string && uids[0].size() >= 1 && uids[0].size() <= 128
+        && (uids.size() < 2 || (uids[1] is string && uids[1].size() >= 1 && uids[1].size() <= 128))
+        && (uids.size() < 3 || (uids[2] is string && uids[2].size() >= 1 && uids[2].size() <= 128))
+        && (uids.size() < 4 || (uids[3] is string && uids[3].size() >= 1 && uids[3].size() <= 128));
+    }
+
+    function isValidRace(data) {
+      return data.keys().hasAll([
+          'raceId', 'roomCode', 'trackId', 'hostUid', 'memberUids', 'standings', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'raceId', 'roomCode', 'trackId', 'hostUid', 'memberUids', 'standings', 'createdAt'
+        ])
+        && isValidId(data.raceId)
+        && data.roomCode is string && data.roomCode.size() >= 6 && data.roomCode.size() <= 12 && data.roomCode.matches('^[A-Z0-9]+$')
+        && data.trackId in ['coastal', 'canyon', 'midnight']
+        && data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128
+        && isValidMemberUids(data.memberUids)
+        && data.standings is list && data.standings.size() >= 1 && data.standings.size() <= 4
+        && data.standings[0] is map
+        && data.createdAt == request.time;
+    }
+
+    function isValidTrackRecord(data) {
+      return data.keys().hasAll([
+          'uid', 'displayName', 'trackId', 'bestTimeMs', 'topSpeedKmh', 'racesWon', 'racesPlayed', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'displayName', 'trackId', 'bestTimeMs', 'topSpeedKmh', 'racesWon', 'racesPlayed', 'updatedAt'
+        ])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 64
+        && data.trackId in ['coastal', 'canyon', 'midnight']
+        && data.bestTimeMs is int && data.bestTimeMs >= 5000 && data.bestTimeMs <= 600000
+        && data.topSpeedKmh is int && data.topSpeedKmh >= 50 && data.topSpeedKmh <= 600
+        && data.racesWon is int && data.racesWon >= 0 && data.racesWon <= 1000000
+        && data.racesPlayed is int && data.racesPlayed >= 1 && data.racesPlayed <= 1000000
+        && data.updatedAt == request.time;
+    }
+
+    // Completed Race History (member-scoped)
+    match /races/{raceId} {
+      allow get: if isVerifiedUser()
+        && isValidId(raceId)
+        && (resource == null || request.auth.uid in resource.data.memberUids);
+
+      allow list: if isVerifiedUser()
+        && request.auth.uid in resource.data.memberUids;
+
+      allow create: if isVerifiedUser()
+        && isValidId(raceId)
+        && isValidRace(incoming())
+        && incoming().raceId == raceId
+        && incoming().hostUid == request.auth.uid
+        && request.auth.uid in incoming().memberUids;
+
+      allow update, delete: if false;
+    }
+
+    // Track Fastest Time Leaderboard (owner-writable, verified-readable)
+    match /records/{recordId} {
+      allow get: if isVerifiedUser()
+        && isValidId(recordId);
+
+      allow list: if isVerifiedUser()
+        && resource.data.bestTimeMs is int
+        && resource.data.bestTimeMs > 0;
+
+      allow create: if isVerifiedUser()
+        && isValidId(recordId)
+        && isValidTrackRecord(incoming())
+        && incoming().uid == request.auth.uid
+        && recordId == request.auth.uid + '_' + incoming().trackId;
+
+      allow update: if isVerifiedUser()
+        && isValidId(recordId)
+        && isValidTrackRecord(incoming())
+        && existing().uid == request.auth.uid
+        && incoming().uid == existing().uid
+        && incoming().trackId == existing().trackId
+        && incoming().racesPlayed >= existing().racesPlayed
+        && incoming().racesWon >= existing().racesWon
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'bestTimeMs', 'topSpeedKmh', 'racesWon', 'racesPlayed', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+  }
+}

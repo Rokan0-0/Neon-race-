@@ -1,0 +1,6 @@
+{
+  "name": "Neon Cycle Grid",
+  "description": "Turn-based 2 to 3 player Light Cycle grid racing game with Minimax AI, Firestore event sourcing, and time-travel rollback.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

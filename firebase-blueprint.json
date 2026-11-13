@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "RaceResult": {
+      "title": "RaceResult",
+      "description": "Completed multiplayer bike race summary and final standings.",
+      "type": "object",
+      "properties": {
+        "raceId": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomCode": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 12,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "trackId": {
+          "type": "string",
+          "enum": ["coastal", "canyon", "midnight"]
+        },
+        "hostUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Bounded list (1 to 4) of participating human rider UIDs."
+        },
+        "standings": {
+          "type": "array",
+          "description": "Ordered array of rider finish times and ranks (max 4)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "raceId",
+        "roomCode",
+        "trackId",
+        "hostUid",
+        "memberUids",
+        "standings",
+        "createdAt"
+      ]
+    },
+    "TrackRecord": {
+      "title": "TrackRecord",
+      "description": "Personal best race time and career stats per user and track.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "trackId": {
+          "type": "string",
+          "enum": ["coastal", "canyon", "midnight"]
+        },
+        "bestTimeMs": {
+          "type": "integer"
+        },
+        "topSpeedKmh": {
+          "type": "integer"
+        },
+        "racesWon": {
+          "type": "integer"
+        },
+        "racesPlayed": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "trackId",
+        "bestTimeMs",
+        "topSpeedKmh",
+        "racesWon",
+        "racesPlayed",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/races/{raceId}": {
+      "schema": {
+        "$ref": "#/entities/RaceResult"
+      },
+      "description": "Historical multiplayer race results visible to participating riders."
+    },
+    "/records/{recordId}": {
+      "schema": {
+        "$ref": "#/entities/TrackRecord"
+      },
+      "description": "Fastest lap/sprint records per track for the leaderboard."
+    }
+  }
+}

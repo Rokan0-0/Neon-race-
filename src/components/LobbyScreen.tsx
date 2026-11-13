@@ -44,14 +44,19 @@ export default function LobbyScreen({
   useEffect(() => {
     let active = true;
     setLoadingBoard(true);
-    Promise.all([fetchTrackLeaderboard(trackId), fetchRecentRaces(user.uid)])
-      .then(([records, races]) => {
+    Promise.allSettled([fetchTrackLeaderboard(trackId), fetchRecentRaces(user.uid)])
+      .then(([recordsRes, racesRes]) => {
         if (!active) return;
-        setLeaderboard(records);
-        setRecentRaces(races);
-      })
-      .catch((err) => {
-        console.error(err);
+        if (recordsRes.status === 'fulfilled') {
+          setLeaderboard(recordsRes.value);
+        } else {
+          console.error('Track leaderboard load error:', recordsRes.reason);
+        }
+        if (racesRes.status === 'fulfilled') {
+          setRecentRaces(racesRes.value);
+        } else {
+          console.error('Recent races load error:', racesRes.reason);
+        }
       })
       .finally(() => {
         if (active) setLoadingBoard(false);

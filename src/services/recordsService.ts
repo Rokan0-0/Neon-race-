@@ -5,6 +5,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
@@ -143,13 +144,14 @@ export async function fetchGlobalLeaderboard(
   try {
     const q = query(
       collection(db, 'records'),
-      where('trackId', '==', trackId),
       where('bestTimeMs', '>', 0),
-      limit(100)
+      orderBy('bestTimeMs', 'asc'),
+      limit(250)
     );
     const snap = await getDocs(q);
     return snap.docs
       .map((d) => d.data() as TrackRecordDoc)
+      .filter((r) => r.trackId === trackId)
       .sort((a, b) => a.bestTimeMs - b.bestTimeMs || b.topSpeedKmh - a.topSpeedKmh)
       .slice(0, maxRows);
   } catch (error) {

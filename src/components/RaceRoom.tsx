@@ -12,6 +12,7 @@ import {
   Play,
   RotateCcw,
   Share2,
+  Smartphone,
   Trophy,
 } from 'lucide-react';
 import { soundEngine } from '../lib/sound';
@@ -62,10 +63,13 @@ export default function RaceRoom({
   const leftHeldRef = useRef(false);
   const rightHeldRef = useRef(false);
   const dragSteerRef = useRef<-1 | 0 | 1>(0);
+  const tiltSteerRef = useRef<-1 | 0 | 1>(0);
   const boostHeldRef = useRef(false);
 
   const [uiSteer, setUiSteer] = useState<-1 | 0 | 1>(0);
   const [uiBoost, setUiBoost] = useState(false);
+  const [tiltEnabled, setTiltEnabled] = useState(false);
+  const [tiltNote, setTiltNote] = useState('');
 
   const prevCountdownRef = useRef<number>(snapshot.countdownSec);
   const prevPhaseRef = useRef(snapshot.phase);
@@ -85,11 +89,46 @@ export default function RaceRoom({
     if (leftHeldRef.current && !rightHeldRef.current) steer = -1;
     else if (rightHeldRef.current && !leftHeldRef.current) steer = 1;
     else if (dragSteerRef.current !== 0) steer = dragSteerRef.current;
+    else if (tiltSteerRef.current !== 0) steer = tiltSteerRef.current;
 
     const boost = boostHeldRef.current;
     setUiSteer(steer);
     setUiBoost(boost);
     onSendInput(steer, boost);
+  }
+
+  async function handleToggleTilt() {
+    setTiltNote('');
+    if (tiltEnabled) {
+      setTiltEnabled(false);
+      tiltSteerRef.current = 0;
+      syncAndEmitInput();
+      return;
+    }
+
+    if (typeof window === 'undefined' || !('DeviceOrientationEvent' in window)) {
+      setTiltNote('Tilt sensor not available on this device');
+      return;
+    }
+
+    const DevOrient = window.DeviceOrientationEvent as unknown as {
+      requestPermission?: () => Promise<'granted' | 'denied'>;
+    };
+
+    if (typeof DevOrient.requestPermission === 'function') {
+      try {
+        const res = await DevOrient.requestPermission();
+        if (res !== 'granted') {
+          setTiltNote('Motion permission denied');
+          return;
+        }
+      } catch {
+        setTiltNote('Could not enable tilt sensor');
+        return;
+      }
+    }
+
+    setTiltEnabled(true);
   }
 
   // Keyboard support for desktop players (includes Boost during COUNTDOWN for Holeshot)
@@ -143,6 +182,7 @@ export default function RaceRoom({
       leftHeldRef.current = false;
       rightHeldRef.current = false;
       dragSteerRef.current = 0;
+      tiltSteerRef.current = 0;
       boostHeldRef.current = false;
       setUiSteer(0);
       setUiBoost(false);
@@ -153,6 +193,32 @@ export default function RaceRoom({
       setSaveOutcome(null);
     }
   }, [snapshot.phase]);
+
+  // Phone tilt steering listener (optional toggle)
+  useEffect(() => {
+    if (!tiltEnabled || snapshot.phase !== 'RACING') {
+      if (tiltSteerRef.current !== 0) {
+        tiltSteerRef.current = 0;
+        syncAndEmitInput();
+      }
+      return;
+    }
+
+    function onDeviceOrientation(e: DeviceOrientationEvent) {
+      if (e.gamma === null) return;
+      const angle = e.gamma;
+      const nextSteer: -1 | 0 | 1 = angle <= -7 ? -1 : angle >= 7 ? 1 : 0;
+      if (nextSteer !== tiltSteerRef.current) {
+        tiltSteerRef.current = nextSteer;
+        syncAndEmitInput();
+      }
+    }
+
+    window.addEventListener('deviceorientation', onDeviceOrientation);
+    return () => {
+      window.removeEventListener('deviceorientation', onDeviceOrientation);
+    };
+  }, [tiltEnabled, snapshot.phase]);
 
   // Stop engine sound on unmount
   useEffect(() => {
@@ -477,9 +543,25 @@ export default function RaceRoom({
               <span className="font-mono text-xs text-slate-300 tabular-nums">
                 {speedKmh} km/h
               </span>
+              <button
+                type="button"
+                onClick={handleToggleTilt}
+                title="Toggle phone tilt steering"
+                className={`flex items-center gap-1 rounded-lg border px-2 py-1 font-mono text-[11px] transition-colors whitespace-nowrap shrink-0 ${
+                  tiltEnabled
+                    ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-200'
+                    : 'border-slate-700 bg-[#090B10] text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Smartphone className="h-3 w-3" />
+                <span>{tiltEnabled ? 'Tilt On' : 'Tilt Off'}</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-3 font-mono text-xs tabular-nums">
+              {tiltNote && (
+                <span className="text-amber-300 hidden sm:inline">{tiltNote}</span>
+              )}
               {myRider && myRider.airTimer > 0 && (
                 <span className="text-fuchsia-300 font-semibold">AIR TIME</span>
               )}
@@ -668,10 +750,18 @@ export default function RaceRoom({
               type="button"
               onPointerDown={(e) => {
                 e.preventDefault();
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {}
                 leftHeldRef.current = true;
                 syncAndEmitInput();
               }}
-              onPointerUp={() => {
+              onPointerUp={(e) => {
+                try {
+                  if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                  }
+                } catch {}
                 leftHeldRef.current = false;
                 syncAndEmitInput();
               }}
@@ -679,14 +769,8 @@ export default function RaceRoom({
                 leftHeldRef.current = false;
                 syncAndEmitInput();
               }}
-              onPointerLeave={() => {
-                if (leftHeldRef.current) {
-                  leftHeldRef.current = false;
-                  syncAndEmitInput();
-                }
-              }}
               disabled={snapshot.phase !== 'RACING'}
-              className={`min-h-[64px] sm:min-h-[68px] flex flex-col items-center justify-center rounded-xl border font-display text-xs font-bold transition-colors touch-none select-none ${
+              className={`min-h-[68px] sm:min-h-[72px] flex flex-col items-center justify-center rounded-xl border font-display text-xs font-bold transition-colors touch-none select-none ${
                 uiSteer === -1
                   ? 'border-cyan-400 bg-cyan-500/25 text-white'
                   : 'border-slate-700 bg-[#111622] text-slate-200'
@@ -700,10 +784,18 @@ export default function RaceRoom({
               type="button"
               onPointerDown={(e) => {
                 e.preventDefault();
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {}
                 boostHeldRef.current = true;
                 syncAndEmitInput();
               }}
-              onPointerUp={() => {
+              onPointerUp={(e) => {
+                try {
+                  if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                  }
+                } catch {}
                 boostHeldRef.current = false;
                 syncAndEmitInput();
               }}
@@ -711,17 +803,11 @@ export default function RaceRoom({
                 boostHeldRef.current = false;
                 syncAndEmitInput();
               }}
-              onPointerLeave={() => {
-                if (boostHeldRef.current) {
-                  boostHeldRef.current = false;
-                  syncAndEmitInput();
-                }
-              }}
               disabled={
                 snapshot.phase === 'FINISHED' ||
                 (snapshot.phase === 'RACING' && (myRider?.nitro ?? 0) <= 4)
               }
-              className={`relative overflow-hidden min-h-[64px] sm:min-h-[68px] flex flex-col items-center justify-center rounded-xl border font-display text-xs font-bold transition-colors touch-none select-none ${
+              className={`relative overflow-hidden min-h-[68px] sm:min-h-[72px] flex flex-col items-center justify-center rounded-xl border font-display text-xs font-bold transition-colors touch-none select-none ${
                 uiBoost
                   ? 'border-emerald-400 bg-emerald-500/25 text-white'
                   : snapshot.phase === 'COUNTDOWN' && snapshot.countdownSec === 1
@@ -746,10 +832,18 @@ export default function RaceRoom({
               type="button"
               onPointerDown={(e) => {
                 e.preventDefault();
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {}
                 rightHeldRef.current = true;
                 syncAndEmitInput();
               }}
-              onPointerUp={() => {
+              onPointerUp={(e) => {
+                try {
+                  if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                  }
+                } catch {}
                 rightHeldRef.current = false;
                 syncAndEmitInput();
               }}
@@ -757,14 +851,8 @@ export default function RaceRoom({
                 rightHeldRef.current = false;
                 syncAndEmitInput();
               }}
-              onPointerLeave={() => {
-                if (rightHeldRef.current) {
-                  rightHeldRef.current = false;
-                  syncAndEmitInput();
-                }
-              }}
               disabled={snapshot.phase !== 'RACING'}
-              className={`min-h-[64px] sm:min-h-[68px] flex flex-col items-center justify-center rounded-xl border font-display text-xs font-bold transition-colors touch-none select-none ${
+              className={`min-h-[68px] sm:min-h-[72px] flex flex-col items-center justify-center rounded-xl border font-display text-xs font-bold transition-colors touch-none select-none ${
                 uiSteer === 1
                   ? 'border-cyan-400 bg-cyan-500/25 text-white'
                   : 'border-slate-700 bg-[#111622] text-slate-200'
